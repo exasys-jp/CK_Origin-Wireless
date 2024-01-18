@@ -39,6 +39,16 @@
           "1911WJ000791": "リビング"
         }
       },
+      2: {
+        id: "2fc9720b-adb2-497f-9cc5-391c1c775072", // serviceId
+        type: "wellBeing",
+        name: "TKTK-POC002(江戸川:佐藤さま)",
+        origin: "1911WJ000694",  // origin device id
+        bots: {
+          "1911WJ000779": "寝室",// bot device id
+          "1911WJ000784": "リビング"
+        }
+      },
     }
     
     function onload() {
@@ -52,13 +62,54 @@
           serviceOption.innerHTML = service.type + ": " + service.name
           serviceSelector.appendChild(serviceOption)
         }
+        var begin = new Date()
+        begin.setHours(0, 0, 0, 0)
+        var end = new Date(begin)
+        end.setDate(begin.getDate() + 1)
+        var url = `/api/services/${service.id}/histories?begin=${Math.floor(begin / 1000)}&end=${Math.floor(end / 1000)}&view=lifeLog`
+
+        ssApi(
+          "GET",
+          url,
+          null,
+          (data) => {
+            var latestData = data.lifeLog[data.lifeLog.length - 1]
+            var serviceIdData = {
+              serviceid: service.id
+            }
+            // GET
+            fetch ('/historyjson', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(serviceIdData)
+            })
+            .then(response => response.json())
+            .then(res => {
+              judges(service.id, res)
+              // 新しいデータが追加された場合
+              if (res.replace(/\\/g, "") != JSON.stringify(latestData)) {
+                // UPDATE
+                latestData.serviceid = service.id
+                fetch ('/updatejson', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(latestData)
+                })
+                .then(response => response.json())
+              }
+            })
+          },
+          (status, resp) => {
+            console.log(`Error retrieving history.\nResp=${JSON.stringify(resp, null, 2)}`)
+          }
+        )
       }
 
       window.onresize = () => {
         for (let i = 0; i < 3; i++) {
           switch (i) {
             case 0:
-              svgName = "allWellBeingHistorySvg"
+              svgName = "wellBeingHistorySvg"
               historyData = allHistoryData
               break
             case 1:
@@ -89,6 +140,7 @@
     var serviceId
     var selectedService
     var dateRangeText
+    let devicesbots = []
 
 
     function selectService(key) {
@@ -233,6 +285,7 @@
           null,
           (data) => {
             renderDeviceNetwork(data.network)
+            noticeSelectDevice(data.network)
             if (onSuccess) onSuccess()
           }
         )
@@ -257,7 +310,7 @@
         td.className = "left"
 
         let deviceIdField = document.createElement("div")
-        deviceIdField.innerHTML = `ORIGIN: ${origin}`
+        deviceIdField.innerHTML = `親機: ${origin}`
         td.appendChild(deviceIdField)
 
         let onlineStatusField = document.createElement("div")
@@ -267,7 +320,9 @@
       }
 
       if (network.bots) {
+        devicesbots = []
         for (let bot of network.bots) {
+          devicesbots.push(bot)
           let tr = document.createElement("tr")
           deviceList.appendChild(tr)
           tr.className = "deviceRow"
@@ -277,7 +332,7 @@
           td.className = "left"
 
           let deviceIdField = document.createElement("div")
-          deviceIdField.innerHTML = `BOT: ${bot}`
+          deviceIdField.innerHTML = `子機: ${bot}`
           const botDesc = selectedService.bots[bot]
           if (botDesc && botDesc.length > 0) {
             deviceIdField.innerHTML += ` (${botDesc})`
@@ -291,6 +346,49 @@
 
         }
       }
+    }
+
+    function noticeSelectDevice(network) {
+      for (var i = 1; i < 5; i++){
+        const selectDevice = document.getElementById(`selectDevice${i}`)
+        while (selectDevice.lastChild) {
+          selectDevice.lastChild.remove()
+        }
+
+        if (network.bots) {
+          for (let bot of network.bots) {
+            var selectDeviceIdField = document.createElement("option")
+            selectDeviceIdField.text = `${bot}`
+            selectDeviceIdField.value = `${bot}`
+            selectDevice.appendChild(selectDeviceIdField)
+          }
+        }
+      }
+      var serviceIdData = {
+        serviceid: serviceId
+      }
+
+      fetch ('/showlogconfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serviceIdData)
+      })
+      .then(response => response.json())
+      .then(res => {
+        for ( var items of res ) {
+          if( items.truefalse == "ON" ) {
+            document.querySelector(`input[type='checkbox'][id='checkbox${items.configid}']`).checked = true;
+          } else {
+            document.querySelector(`input[type='checkbox'][id='checkbox${items.configid}']`).checked = false;
+          }
+          document.getElementById(`selectDevice${items.configid}`).querySelector(`option[value='${items.bot}']`).selected = true;
+          document.getElementById(`selectMinutes${items.configid}`).value = items.minutes;
+          if ( items.minutes == 0 ) {
+            document.getElementById(`selectMinutes${items.configid}`).value = "";
+          }
+          document.getElementById(`findLost${items.configid}`).querySelector(`option[value='${items.findlost}']`).selected = true;
+        }
+      })
     }
 
     function getServiceConfig(serviceId) {
@@ -383,7 +481,8 @@
         if (status) {
           let statusText = (status.online != null && status.online) ? "online" : "offline"
           onlineStatusField.classList.add(statusText)
-          onlineStatusField.innerHTML = `&#9679; ${statusText}`
+          const jpStatusText = statusText.replace("online", "オンライン").replace("offline", "オフライン")
+          onlineStatusField.innerHTML = `&#9679; ${jpStatusText}`
         }
       }
 
@@ -395,7 +494,8 @@
           if (status) {
             let statusText = (status.bots && status.bots.includes(bot)) ? "online" : "offline"
             botStatusField.classList.add(statusText)
-            botStatusField.innerHTML = `&#9679; ${statusText}`
+            const jpStatusText = statusText.replace("online", "オンライン").replace("offline", "オフライン")
+            botStatusField.innerHTML = `&#9679; ${jpStatusText}`
           }
         }
       }
@@ -412,6 +512,13 @@
 
     function onHistoryView(view) {
       historyView = view
+      splitHistory.style.display="block"
+      dataDetail.style.display = "block"
+      if (view == "sleep") {
+        historyGraph = "allHistory"
+        splitHistory.style.display="none"
+        dataDetail.style.display = "none"
+      }
       loadHistory()
     }
 
@@ -422,9 +529,190 @@
       loadHistory()
     }
 
-    var refDate
+    function onLogConfigSave(){
+      let checkBox1 = document.getElementById("checkbox1")
+      let checkBox2 = document.getElementById("checkbox2")
+      let checkBox3 = document.getElementById("checkbox3")
+      let checkBox4 = document.getElementById("checkbox4")
+      let TFStr1
+      let TFStr2
+      let TFStr3
+      let TFStr4
+      let minNum1
+      let minNum2
+      let minNum3
+      let minNum4
+
+      const selectMinutes1 = document.getElementById("selectMinutes1")
+      if (checkBox1.checked) {
+        TFStr1 = "ON"
+        minNum1 = selectMinutes1.value
+        if (selectMinutes1.value == "") {
+          minNum1 = 1
+          selectMinutes1.value = 1
+        }
+      } else {
+        TFStr1 = "OFF"
+        minNum1 = selectMinutes1.value
+        if (selectMinutes1.value == "") {
+          minNum1 = 0
+        }
+      }
+      const selectDevice1 = document.getElementById("selectDevice1")
+      const devNum1 = selectDevice1.selectedIndex
+      const devStr1 = selectDevice1.options[devNum1].value
+      
+      const findLost1 = document.getElementById("findLost1")
+      const FLNum1 = findLost1.selectedIndex
+      const FLStr1 = findLost1.options[FLNum1].value
+      if (selectMinutes1.value == 0) {
+        selectMinutes1.value = ""
+      }
+
+      const logConfig1 = {
+        serviceid: serviceId,
+        configid: '1',
+        bot: devStr1,
+        minutes: minNum1,
+        findlost: FLStr1,
+        truefalse: TFStr1
+      }
+      fetch ('/updatelogconfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logConfig1)
+      })
+      .then(response => response.json())
+
+      const selectMinutes2 = document.getElementById("selectMinutes2")
+      if (checkBox2.checked) {
+        TFStr2 = "ON"
+        minNum2 = selectMinutes2.value
+        if (selectMinutes2.value == "") {
+          minNum2 = 1
+          selectMinutes2.value = 1
+        }
+      } else {
+        TFStr2 = "OFF"
+        minNum2 = selectMinutes2.value
+        if (selectMinutes2.value == "") {
+          minNum2 = 0
+        }
+      }
+      const selectDevice2 = document.getElementById("selectDevice2")
+      const devNum2 = selectDevice2.selectedIndex
+      const devStr2 = selectDevice2.options[devNum2].value
+      if (selectMinutes2.value == 0) {
+        selectMinutes2.value = ""
+      }
+
+      const findLost2 = document.getElementById("findLost2")
+      const FLNum2 = findLost2.selectedIndex
+      const FLStr2 = findLost2.options[FLNum2].value
+
+      const logConfig2 = {
+        serviceid: serviceId,
+        configid: '2',
+        bot: devStr2,
+        minutes: minNum2,
+        findlost: FLStr2,
+        truefalse: TFStr2
+      }
+      fetch ('/updatelogconfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logConfig2)
+      })
+      .then(response => response.json())
+
+      const selectMinutes3 = document.getElementById("selectMinutes3")
+      if (checkBox3.checked) {
+        TFStr3 = "ON"
+        minNum3 = selectMinutes3.value
+        if (selectMinutes3.value == "") {
+          minNum3 = 1
+          selectMinutes3.value = 1
+        }
+      } else {
+        TFStr3 = "OFF"
+        minNum3 = selectMinutes3.value
+        if (selectMinutes3.value == "") {
+          minNum3 = 0
+        }
+      }
+      const selectDevice3 = document.getElementById("selectDevice3")
+      const devNum3 = selectDevice3.selectedIndex
+      const devStr3 = selectDevice3.options[devNum3].value
+      if (selectMinutes3.value == 0) {
+        selectMinutes3.value = ""
+      }
+      
+      const findLost3 = document.getElementById("findLost3")
+      const FLNum3 = findLost3.selectedIndex
+      const FLStr3 = findLost3.options[FLNum3].value
+
+      const logConfig3 = {
+        serviceid: serviceId,
+        configid: '3',
+        bot: devStr3,
+        minutes: minNum3,
+        findlost: FLStr3,
+        truefalse: TFStr3
+      }
+      fetch ('/updatelogconfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logConfig3)
+      })
+      .then(response => response.json())
+
+      const selectMinutes4 = document.getElementById("selectMinutes4")
+      if (checkBox4.checked) {
+        TFStr4 = "ON"
+        minNum4 = selectMinutes4.value
+        if (selectMinutes4.value == "") {
+          minNum4 = 1
+          selectMinutes4.value = 1
+        }
+      } else {
+        TFStr4 = "OFF"
+        minNum4 = selectMinutes4.value
+        if (selectMinutes4.value == "") {
+          minNum4 = 0
+        }
+      }
+      const selectDevice4 = document.getElementById("selectDevice4")
+      const devNum4 = selectDevice4.selectedIndex
+      const devStr4 = selectDevice4.options[devNum4].value
+      if (selectMinutes4.value == 0) {
+        selectMinutes4.value = ""
+      }
+      
+      const findLost4 = document.getElementById("findLost4")
+      const FLNum4 = findLost4.selectedIndex
+      const FLStr4 = findLost4.options[FLNum4].value
+
+      const logConfig4 = {
+        serviceid: serviceId,
+        configid: '4',
+        bot: devStr4,
+        minutes: minNum4,
+        findlost: FLStr4,
+        truefalse: TFStr4
+      }
+      fetch ('/updatelogconfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logConfig4)
+      })
+      .then(response => response.json())
+    }
+
+    var refDate 
+    var prevDate = 0
+    var nextDate = 0
     var historyData = null
-    var svgName = "allWellBeingHistorySvg"
+    var svgName = "wellBeingHistorySvg"
     var allHistoryData
     var firstHistoryData
     var secondHistoryData
@@ -636,7 +924,7 @@
             dateRange.innerHTML = dateRangeText + " <b>&#x21bb;</b>"
 
             if (data && data.serviceId === serviceId) {
-              const allDayHistory = document.getElementById("allWellBeingHistorySvg")
+              const allDayHistory = document.getElementById("wellBeingHistorySvg")
               const firstDayHistory = document.getElementById("firstWellBeingHistorySvg")
               const secondDayHistory = document.getElementById("secondWellBeingHistorySvg")
 
@@ -654,7 +942,7 @@
                 }
               switch (i) {
                 case 0:
-                  svgName = "allWellBeingHistorySvg"
+                  svgName = "wellBeingHistorySvg"
                   allHistoryData = data
                   historyData = data
                   drawHistoryGraph()
@@ -673,6 +961,106 @@
                   break
               }
             }
+            var endBegin = data.end - data.begin
+
+            if (endBegin == 86400) {
+              var devicesCount0 = 0
+              var devicesCount1 = 0
+              // var sleepState = []
+              for ( var lifeLog of data.lifeLog ) {
+                if (lifeLog.bot == devicesbots[0]) {
+                  devicesCount0++
+                }
+                if (lifeLog.bot == devicesbots[1]) {
+                  devicesCount1++
+                }
+                // if (lifeLog.sleepStage && lifeLog.stateTime < data.begin + 43200) {
+                //   sleepState.push(lifeLog.stateTime)
+                // }
+              }
+              const graphValue = document.getElementById("graphValue")
+              while (graphValue.lastChild) {
+                graphValue.lastChild.remove()
+              }
+              var tr = document.createElement("tr")
+              graphValue.appendChild(tr)
+              tr.className = "ValueRow"
+
+              var td = document.createElement("td")
+              tr.appendChild(td)
+              td.className = "left"
+
+              var graphValueField = document.createElement("div")
+              graphValueField.innerHTML = `合計入室回数(${devicesbots[0]}): ${devicesCount0}回`
+              td.appendChild(graphValueField)
+
+              var tr = document.createElement("tr")
+              graphValue.appendChild(tr)
+              tr.className = "ValueRow"
+
+              var td = document.createElement("td")
+              tr.appendChild(td)
+              td.className = "left"
+
+              var graphValueField = document.createElement("div")
+              graphValueField.innerHTML = `合計入室回数(${devicesbots[1]}): ${devicesCount1}回`
+              td.appendChild(graphValueField)
+
+              var tr = document.createElement("tr")
+              graphValue.appendChild(tr)
+              tr.className = "ValueRow"
+
+              var td = document.createElement("td")
+              tr.appendChild(td)
+              td.className = "left"
+
+              // if (sleepState.length) {
+              //   var graphValueField = document.createElement("div")
+              //   graphValueField.innerHTML = `睡眠開始時間: ${sleepState[0]}`
+              //   td.appendChild(graphValueField)
+
+              //   var tr = document.createElement("tr")
+              //   graphValue.appendChild(tr)
+              //   tr.className = "ValueRow"
+
+              //   var td = document.createElement("td")
+              //   tr.appendChild(td)
+              //   td.className = "left"
+
+              //   var graphValueField = document.createElement("div")
+              //   graphValueField.innerHTML = `睡眠終了時間: ${sleepState[sleepState.length - 1]}`
+              //   td.appendChild(graphValueField)
+              // }
+            }
+            if ( prevDate == 0 && nextDate == 0 ) {
+              if (endBegin == 86400) {
+                var latestData = data.lifeLog[data.lifeLog.length - 1]
+                var serviceIdData = {
+                  serviceid: serviceId
+                }
+                // GET
+                fetch ('/historyjson', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(serviceIdData)
+                })
+                .then(response => response.json())
+                .then(res => {
+                  // 新しいデータが追加された場合
+                  if (res.replace(/\\/g, "") != JSON.stringify(latestData)) {
+                    // UPDATE
+                    latestData.serviceid = serviceId
+                    fetch ('/updatejson', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(latestData)
+                    })
+                    .then(response => response.json())
+                  }
+                })
+              }
+            }
+            report(serviceId)
           },
           (status, resp) => {
             console.log(`Error retrieving history.\nResp=${JSON.stringify(resp, null, 2)}`)
@@ -1144,6 +1532,18 @@
       svg.appendChild(gAxisLabels)
 
       // x-axis labels
+      // switch (svgName) {
+      //   case "wellBeingHistorySvg":
+      //     var totalHours = 24
+      //     break
+      //   case "firstWellBeingHistorySvg":
+      //     var totalHours = 12
+      //     break
+      //   case "secondWellBeingHistorySvg":
+      //     var totalHours = 12
+      //     break
+      // }
+      // console.log(svgName)
       const totalHours = 24
       const maxLabels = Math.floor(graph.width / 50)
       var hoursPerLabel = Math.ceil(totalHours / maxLabels)
@@ -1432,6 +1832,8 @@
         default:
           refDate.setDate(refDate.getDate() - 1)
       }
+      prevDate++
+      nextDate--
       loadHistory()
     }
 
@@ -1450,6 +1852,8 @@
           refDate.setDate(refDate.getDate() + 1)
           break
       }
+      nextDate++
+      prevDate--
       loadHistory()
     }
 
@@ -1537,6 +1941,177 @@
       }
       else {
         request.send()
+      }
+    }
+
+    function judges(id, value) {
+      var historyData = JSON.parse(value)
+      var currentTime = new Date()
+      var beforeUnix = currentTime.getTime()
+      var currentUnix = Math.floor( beforeUnix / 1000 )
+
+      var year = currentTime.getFullYear()
+      var month = currentTime.getMonth()+1
+      var day = currentTime.getDate()
+      var hours = currentTime.getHours()
+      var minutes = currentTime.getMinutes()
+      var seconds = currentTime.getSeconds()
+      var currentDate = year + '/' + month + '/' + day + ' ' + hours + ':' + minutes + ':' + seconds
+      var serviceIdData = {
+        serviceid: id
+      }
+      fetch ('/showlogconfig', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serviceIdData)
+      })
+      .then(response => response.json())
+      .then(res => {
+        for ( var items of res ) {
+          if ( items.truefalse == 'ON' ) {
+            var minutesUnix = items.minutes * 60
+            var stateDiff = currentUnix - historyData.stateTime
+            if ( minutesUnix <= stateDiff ) {
+              switch ( items.findlost ) {
+                case 'find':
+                  if ( historyData.detection == 1 && historyData.bot == items.bot ) {
+                    noticeLogSave(items, currentDate)
+                  }
+                  break
+                case 'lost':
+                  if ( historyData.bot != items.bot ) {
+                    noticeLogSave(items, currentDate)
+                  }
+                  break
+              }
+            }
+          }
+        }
+      })
+    }
+
+    function noticeLogSave(params, time) {
+      var logItems = {
+        serviceid: params.serviceid,
+        findlost: params.findlost,
+        noticetime: time,
+        bot: params.bot
+      }
+      fetch ('/postnoticelog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(logItems)
+      })
+      .then(response => response.json())
+    }
+
+    function report(id) {
+      var tbody = document.getElementById('noticeLog')
+      var rows = tbody.getElementsByTagName('tr')
+      var serviceid = {
+        serviceid: id
+      }
+      fetch ('/shownoticelog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serviceid)
+      })
+      .then(response => response.json())
+      .then(res => {
+        if (rows.length != 0) {
+          for (var i = rows.length - 1; i > -1; i--) {
+              tbody.deleteRow(i);
+          }
+        }
+        for ( var log of res ) {
+          var newRow = tbody.insertRow()
+          var newCell = newRow.insertCell()
+          if ( log.findlost == 'find' ) {
+            var FLText = '入室検知'
+          } else {
+            var FLText = '不在検知'
+          }
+          var newText = document.createTextNode(FLText)
+          newCell.appendChild(newText);
+          newCell = newRow.insertCell()
+          newText = document.createTextNode(log.noticetime)
+          newCell.appendChild(newText);
+          newCell = newRow.insertCell()
+          newText = document.createTextNode(log.bot)
+          newCell.appendChild(newText);
+        }
+      })
+    }
+
+    function weekAverage() {
+      var devicesCount0 = 0
+      var devicesCount1 = 0
+      var devicesCount0State = []
+      var devicesCount1State = []
+      for (var i = 0; i < 7; i++) {
+        var begin = new Date(refDate)
+        var end = new Date(begin)
+        begin.setDate(begin.getDate() - i)
+        begin.setHours(0, 0, 0, 0)
+        end.setDate(begin.getDate() + 1)
+        var url = `/api/services/${serviceId}/histories?begin=${Math.floor(begin / 1000)}&end=${Math.floor(end / 1000)}&view=lifeLog`
+        ssApi(
+          "GET",
+          url,
+          null,
+          (data) => {
+            for ( var lifeLog of data.lifeLog ) {
+              if (lifeLog.bot == devicesbots[0]) {
+                devicesCount0++
+              }
+              if (lifeLog.bot == devicesbots[1]) {
+                devicesCount1++
+              }
+            }
+            devicesCount0State.push(devicesCount0)
+            devicesCount1State.push(devicesCount1)
+          },
+          (status, resp) => {
+            console.log(`Error retrieving history.\nResp=${JSON.stringify(resp, null, 2)}`)
+          }
+        )
+        console.log(devicesCount0)
+        console.log(devicesCount1)
+        const averageValue = document.getElementById("averageValue")
+        while (averageValue.lastChild) {
+          averageValue.lastChild.remove()
+        }
+        var tr = document.createElement("tr")
+        averageValue.appendChild(tr)
+        tr.className = "ValueRow"
+
+        var td = document.createElement("td")
+        tr.appendChild(td)
+        td.className = "left"
+
+        var averageValueField = document.createElement("div")
+        averageValueField.innerHTML = `週平均入室回数(${devicesbots[0]}): ${devicesCount0}回`
+        td.appendChild(averageValueField)
+
+        var tr = document.createElement("tr")
+        averageValue.appendChild(tr)
+        tr.className = "ValueRow"
+
+        var td = document.createElement("td")
+        tr.appendChild(td)
+        td.className = "left"
+
+        var averageValueField = document.createElement("div")
+        averageValueField.innerHTML = `週平均入室回数(${devicesbots[1]}): ${devicesCount1}回`
+        td.appendChild(averageValueField)
+
+        var tr = document.createElement("tr")
+        averageValue.appendChild(tr)
+        tr.className = "ValueRow"
+
+        var td = document.createElement("td")
+        tr.appendChild(td)
+        td.className = "left"
       }
     }
 
@@ -1719,15 +2294,6 @@
       font-size: large;
     }
 
-    select {
-      outline: none;
-      border: none;
-      text-align-last: center;
-      background-color: transparent;
-      color: white;
-      border: 0px;
-    }
-
     select option {
       background-color: rgba(0, 0, 0, 0.6);
       color: white;
@@ -1740,6 +2306,8 @@
     }
 
     .serviceSelector {
+      outline: none;
+      text-align-last: center;
       background-color: rgba(0, 0, 0, 0.1);
       font-size: large;
       color: white;
@@ -1908,8 +2476,8 @@
     }
 
     .subtitle {
-      font-size: small;
-      color: rgba(255, 255, 255, 0.66);
+      font-size: medium;
+      color: rgba(255, 255, 255, 0.66);   
     }
 
     .detailIndicator {
@@ -1973,6 +2541,61 @@
       background-color: red
     }
 
+    .checkbox-container {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .checkbox-container input[type="checkbox"] {
+      display: none;
+    }
+
+    .checkbox-container .checkmark {
+      margin-right: 5px;
+      height: 20px;
+      width: 20px;
+      border: 1px solid #000;
+      background-color: #fff;
+    }
+
+    .checkbox-container input:checked ~ .checkmark {
+      background-color: #00ff1a;
+    }
+
+    .noticeLogs {
+      width: 100%;
+      margin: -2px 0 0 -2px;
+    }
+
+    .noticeLogs table,
+    .noticeLogs td {
+      border: 1px solid #333;
+      padding-left: 0;
+    }
+
+    .noticeLogs thead {
+      background-color: #333;
+      color: #fff;
+    }
+
+    .noticeLog {
+      overflow-x: hidden;
+      overflow-y: scroll;
+      height: 300px;
+    }
+
+    .noticeLogBox {
+      overflow-y: auto;
+      height: 300px;
+    }
+
+    .noticeLogHead {
+      position: sticky;
+      top: 0;
+      left: 0;
+    }
+
     @keyframes spin {
       0% {
         transform: rotate(0deg);
@@ -1993,6 +2616,14 @@
     </div>
     <div class="page active" id="homePage">
       <div id="history">
+        <div class="segmentedControl" id="historyView"
+          style="width: 100%; margin: 15px auto 0px auto; font-size: midium; font-weight: bold; border-radius: 5px 5px 0 0;">
+          <div data-value="lifeLog" class="segmentedControlButton selected"
+            onclick="onHistoryView(this.dataset.value)" style="border-radius: 5px 0 0 0;">活動ログ</div>
+          <div data-value="sleep" class="segmentedControlButton" 
+            onclick="onHistoryView(this.dataset.value)" style="border-radius: 0 5px 0 0;">睡眠ログ
+          </div>
+        </div>
         <div class="groupBox" style="padding-top: 3px; padding-bottom: 15px;">
           <table style="width: 100%; margin: 10px 10px 0px 10px">
             <tr>
@@ -2032,35 +2663,108 @@
           </div>
           <div class="engineSpecific" data-type="wellBeing">
             <div class="segmentedControl" id="historyGraph"
-              style="width: 95%; max-width: 480px; margin: 15px auto 0px auto; font-size: small;">
+              style="width: 95%; max-width: 480px; margin: 15px auto 0px auto; font-size: midium; font-weight: bold;">
               <div data-value="allHistory" class="segmentedControlButton selected"
                 onclick="changeHistoryGraph(this.dataset.value)">終日表示</div>
-              <div data-value="splitHistory" class="segmentedControlButton" 
+              <div data-value="splitHistory" class="segmentedControlButton" id="splitHistory"
                 onclick="changeHistoryGraph(this.dataset.value)">午前／午後表示</div>
             </div>
-            <svg width="100%" height="380" id="allWellBeingHistorySvg">
+            <svg width="100%" height="380" id="wellBeingHistorySvg">
             </svg>
             <svg width="100%" height="380" id="firstWellBeingHistorySvg">
             </svg>
             <svg width="100%" height="380" id="secondWellBeingHistorySvg">
             </svg>
-            <div class="segmentedControl" id="historyView"
-              style="width: 95%; max-width: 480px; margin: 15px auto 0px auto; font-size: small;">
-              <div data-value="lifeLog" class="segmentedControlButton selected"
-                onclick="onHistoryView(this.dataset.value)">活動ログ</div>
-              <div data-value="sleep" class="segmentedControlButton" onclick="onHistoryView(this.dataset.value)">睡眠ログ
-              </div>
-            </div>
           </div>
+        </div>
+      </div>
+      <div id="dataDetail" class="groupBox" style="padding: 0;">
+        <div
+          style="text-align:left; font-weight: bold; background-color: rgba(0, 0, 0, 0.3); padding: 5px 10px; border-top-left-radius: 5px; border-top-right-radius: 5px;">
+          データ詳細
+        </div>
+        <div style="padding: 10px 10px">
+          <table id="graphValue" class="valueList"></table>
+          <table id="averageValue" class="valueList"></table>
+          <input type="button" value="週平均値" onclick="weekAverage()"/>
         </div>
       </div>
       <div class="groupBox" style="padding: 0">
         <div
           style="text-align:left; font-weight: bold; background-color: rgba(0, 0, 0, 0.3); padding: 5px 10px; border-top-left-radius: 5px; border-top-right-radius: 5px;">
-          Devices
+          デバイス状況
         </div>
         <div style="padding: 0px 10px">
           <table id="deviceList" class="panelList"></table>
+        </div>
+      </div>
+      <div class="groupBox" style="padding: 0">
+        <div
+          style="text-align:left; font-weight: bold; background-color: rgba(0, 0, 0, 0.3); padding: 5px 10px; border-top-left-radius: 5px; border-top-right-radius: 5px;">
+          ログ保存設定
+        </div>
+        <div style="padding: 10px 10px">
+          <div class="checkbox-container" id="checkbox-container1">
+            <input type="checkbox" id="checkbox1"/>
+            <label class="checkmark" for="checkbox1"></label>
+            <select id="selectDevice1"></select>
+            <input type="number" id="selectMinutes1" min="0" max="1440" placeholder="1~1440"/>
+            <select id="findLost1">
+              <option value="find">在室</option>
+              <option value="lost">不在</option>
+            </select>
+          </div>
+          <div class="checkbox-container" id="checkbox-container2">
+            <input type="checkbox" id="checkbox2"/>
+            <label class="checkmark" for="checkbox2"></label>
+            <select id="selectDevice2"></select>
+            <input type="number" id="selectMinutes2" min="0" max="1440" placeholder="1~1440"/>
+            <select id="findLost2">
+              <option value="find">在室</option>
+              <option value="lost">不在</option>
+            </select>
+          </div>
+          <div class="checkbox-container" id="checkbox-container3">
+            <input type="checkbox" id="checkbox3"/>
+            <label class="checkmark" for="checkbox3"></label>
+            <select id="selectDevice3"></select>
+            <input type="number" id="selectMinutes3" min="0" max="1440" placeholder="1~1440"/>
+            <select id="findLost3">
+              <option value="find">在室</option>
+              <option value="lost">不在</option>
+            </select>
+          </div>
+          <div class="checkbox-container" id="checkbox-container4">
+            <input type="checkbox" id="checkbox4"/>
+            <label class="checkmark" for="checkbox4"></label>
+            <select id="selectDevice4"></select>
+            <input type="number" id="selectMinutes4" min="0" max="1440" placeholder="1~1440"/>
+            <select id="findLost4">
+              <option value="find">在室</option>
+              <option value="lost">不在</option>
+            </select>
+          </div>
+          <div class="logConfigSave" style="text-align: left">
+            <input type="button" value="保存" onclick="onLogConfigSave()"/>
+          </div>
+        </div>
+      </div>
+      <div class="groupBox" style="padding: 0;">
+        <div
+          style="text-align:left; font-weight: bold; background-color: rgba(0, 0, 0, 0.3); padding: 5px 10px; border-top-left-radius: 5px; border-top-right-radius: 5px;">
+          条件通知ログ
+        </div>
+        <div class="noticeLogBox">
+          <table class="noticeLogs">
+            <thead class="noticeLogHead">
+              <tr>
+                <td>入室検知／不在検知</td>
+                <td>通知時間</td>
+                <td>デバイス名</td>
+              </tr>
+            </thead>
+            <tbody id="noticeLog"></tbody>
+          </table>
         </div>
       </div>
     </div>

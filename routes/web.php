@@ -13,8 +13,11 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::get('/', 'CsvDatasController@index');
+Route::get('/', 'JsonHistoryDatasController@index');
 
-Route::resource('/csvdatas', 'CsvDatasController')->only([
-    'index', 'store'
-]);
+Route::post('/historyjson', 'JsonHistoryDatasController@show');
+Route::post('/updatejson', 'JsonHistoryDatasController@update');
+Route::post('/showlogconfig', 'LogConfigsController@show');
+Route::post('/updatelogconfig', 'LogConfigsController@update');
+Route::post('/shownoticelog', 'NoticeLogsController@show');
+Route::post('/postnoticelog', 'NoticeLogsController@create');
